@@ -153,7 +153,8 @@ public partial class MainForm : Form
                 float score = !site.IsUp ? 95f
                     : site.ResponseTimeMs >= 1000 ? 80f
                     : site.ResponseTimeMs >= 500 ? 65f
-                    : site.ResponseTimeMs >= 200 ? 35f
+                    : site.ResponseTimeMs >= 200 ? 40f
+                    : site.ResponseTimeMs >= 80 ? 25f
                     : 5f;
                 if (score > worstScore) worstScore = score;
             }

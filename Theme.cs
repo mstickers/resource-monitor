@@ -58,7 +58,8 @@ public static class Theme
     public static Color WebsiteResponseColor(int ms)
     {
         if (ms < 0) return Color.FromArgb(220, 50, 40); // DOWN
-        if (ms < 200) return Color.FromArgb(50, 200, 60);
+        if (ms < 80) return Color.FromArgb(50, 200, 60);
+        if (ms < 200) return Color.FromArgb(160, 210, 50);
         if (ms < 500) return Color.FromArgb(220, 220, 40);
         if (ms < 1000) return Color.FromArgb(240, 150, 30);
         return Color.FromArgb(220, 50, 40);
