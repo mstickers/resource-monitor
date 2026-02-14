@@ -5,4 +5,8 @@ public readonly record struct NetworkSnapshot(
     long BytesSent,
     long BytesReceived,
     double SendRateKBps,
-    double ReceiveRateKBps);
+    double ReceiveRateKBps,
+    NetworkRole Role = NetworkRole.Unknown)
+{
+    public double TotalRateKBps => SendRateKBps + ReceiveRateKBps;
+}

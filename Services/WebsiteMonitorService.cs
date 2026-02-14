@@ -97,6 +97,14 @@ public sealed class WebsiteMonitorService : IDisposable
         }
     }
 
+    public Dictionary<string, RingBuffer<WebsiteCheck>> GetHistory()
+    {
+        lock (_lock)
+        {
+            return new Dictionary<string, RingBuffer<WebsiteCheck>>(_history);
+        }
+    }
+
     public void Dispose()
     {
         _timer?.Dispose();

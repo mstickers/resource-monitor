@@ -14,7 +14,7 @@ public sealed class EventLogService
         @"Faulting application name:\s*(\S+?)[\s,]",
         RegexOptions.Compiled);
 
-    public (int OomWarnings, int AppCrashes) GetCounts()
+    public (int OomWarnings, int AppCrashes, int CriticalEvents) GetCounts()
     {
         int oom = CountEvents("System",
             "*[System[Provider[@Name='Microsoft-Windows-Resource-Exhaustion-Detector'] and (EventID=2004) and TimeCreated[timediff(@SystemTime) <= 172800000]]]");
@@ -22,7 +22,10 @@ public sealed class EventLogService
         int crashes = CountEvents("Application",
             "*[System[Provider[@Name='Application Error'] and TimeCreated[timediff(@SystemTime) <= 172800000]]]");
 
-        return (oom, crashes);
+        int critical = CountEvents("System",
+            "*[System[(Level=1) and TimeCreated[timediff(@SystemTime) <= 172800000]]]");
+
+        return (oom, crashes, critical);
     }
 
     public List<OomEvent> GetOomEvents()
@@ -72,6 +75,34 @@ public sealed class EventLogService
                     results.Add(new OomEvent(
                         record.TimeCreated ?? DateTime.Now,
                         source,
+                        message,
+                        record.Id));
+                }
+            }
+        }
+        catch { }
+        return results;
+    }
+
+    public List<OomEvent> GetCriticalEvents()
+    {
+        var results = new List<OomEvent>();
+        try
+        {
+            var query = new EventLogQuery("System", PathType.LogName,
+                "*[System[(Level=1) and TimeCreated[timediff(@SystemTime) <= 172800000]]]");
+
+            using var reader = new EventLogReader(query);
+            EventRecord? record;
+            while ((record = reader.ReadEvent()) != null)
+            {
+                using (record)
+                {
+                    string message = "";
+                    try { message = record.FormatDescription() ?? ""; } catch { }
+                    results.Add(new OomEvent(
+                        record.TimeCreated ?? DateTime.Now,
+                        record.ProviderName ?? "System",
                         message,
                         record.Id));
                 }

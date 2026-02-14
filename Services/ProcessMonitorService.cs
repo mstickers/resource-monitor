@@ -9,11 +9,14 @@ public sealed class ProcessMonitorService
     private Dictionary<int, (TimeSpan Cpu, DateTime When)> _prevCpu = [];
     private readonly int _processorCount = Environment.ProcessorCount;
 
+    public int TotalHandleCount { get; private set; }
+
     public List<ProcessInfo> GetProcesses()
     {
         var now = DateTime.UtcNow;
         var newCpu = new Dictionary<int, (TimeSpan Cpu, DateTime When)>();
         var result = new List<ProcessInfo>(64);
+        int totalHandles = 0;
 
         foreach (var proc in Process.GetProcesses())
         {
@@ -24,6 +27,9 @@ public sealed class ProcessMonitorService
                 TimeSpan totalCpu = proc.TotalProcessorTime;
                 DateTime? startTime = null;
                 try { startTime = proc.StartTime; } catch { }
+                int handles = 0;
+                try { handles = proc.HandleCount; } catch { }
+                totalHandles += handles;
 
                 // CPU % = delta CPU time / delta wall time / processor count
                 double cpuPct = 0;
@@ -50,7 +56,8 @@ public sealed class ProcessMonitorService
                         cpuPct,
                         totalCpu,
                         startTime,
-                        ProcessInfo.ComputeSeverity(priv, cpuPct)));
+                        ProcessInfo.ComputeSeverity(priv, cpuPct),
+                        handles));
                 }
             }
             catch { }
@@ -58,6 +65,7 @@ public sealed class ProcessMonitorService
         }
 
         _prevCpu = newCpu;
+        TotalHandleCount = totalHandles;
         result.Sort((a, b) => b.PrivateBytes.CompareTo(a.PrivateBytes));
         return result;
     }

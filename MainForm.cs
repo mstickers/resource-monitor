@@ -14,68 +14,46 @@ public partial class MainForm : Form
     private readonly NetworkMonitorService _networkService = new();
     private readonly DiskMonitorService _diskService = new();
     private readonly WebsiteMonitorService _websiteService = new();
+    private readonly PingMonitorService _pingService = new();
     private readonly RingBuffer<SystemSnapshot> _ringBuffer = new(600);
 
     private System.Threading.Timer? _timer;
     private int _intervalMs = 1000;
     private int _tickCount;
     private const int EventLogEveryN = 60;
+    private const int PingEveryN = 10; // ping every 10 ticks
 
     private List<ProcessInfo> _processes = [];
     private int _sortColumn = 3; // Private bytes
     private bool _sortAscending;
-    private int _lastOomCount = -1;
-    private int _lastCrashCount = -1;
+    private int _lastOomCount;
+    private int _lastCrashCount;
+    private int _lastCriticalCount;
+    private List<PingResult> _lastPingResults = [];
 
     public MainForm()
     {
         InitializeComponent();
         _graphPanel.SetBuffer(_ringBuffer);
-        UpdateIntervalButtons();
 
         // Load website config
         string configDir = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "config");
         string configPath = Path.Combine(configDir, "websites.txt");
-        // Also try relative to project root
         if (!File.Exists(configPath))
             configPath = Path.Combine(Path.GetDirectoryName(Application.ExecutablePath)!, "..", "..", "..", "..", "config", "websites.txt");
         _websiteService.LoadConfig(configPath);
 
         Load += (_, _) =>
         {
-            _memoryBar.Width = _topPanel.ClientSize.Width - 24;
-            PositionButtons();
-
             _balloonLabel.Text = _balloonService.DriverDetected
                 ? "Balloon: detected"
                 : "Balloon: not detected";
 
             if (_websiteService.SiteCount > 0)
-            {
-                _sitesLabel.Text = $"Sites: monitoring {_websiteService.SiteCount} site(s)...";
                 _websiteService.Start(60);
-            }
-            else
-            {
-                _sitesLabel.Text = "Sites: no config (edit config/websites.txt)";
-            }
 
             _timer = new System.Threading.Timer(OnTick, null, 0, _intervalMs);
         };
-
-        Resize += (_, _) =>
-        {
-            _memoryBar.Width = _topPanel.ClientSize.Width - 24;
-            PositionButtons();
-        };
-    }
-
-    private void PositionButtons()
-    {
-        int right = _topPanel.ClientSize.Width - 12;
-        _btn10s.Left = right - _btn10s.Width;
-        _btn5s.Left = _btn10s.Left - _btn5s.Width - 4;
-        _btn1s.Left = _btn5s.Left - _btn1s.Width - 4;
     }
 
     private void OnTick(object? state)
@@ -84,93 +62,92 @@ public partial class MainForm : Form
         {
             var snapshot = _memoryService.GetSnapshot();
             var processes = _processService.GetProcesses();
+            int totalHandles = _processService.TotalHandleCount;
             var netSnaps = _networkService.GetSnapshots();
             var diskSnap = _diskService.GetSnapshot();
+            var tcpSnap = NetworkMonitorService.GetTcpSnapshot();
 
-            int oomCount = -1, crashCount = -1;
+            int oomCount = -1, crashCount = -1, criticalCount = -1;
             int tick = Interlocked.Increment(ref _tickCount);
             if (tick == 1 || tick % EventLogEveryN == 0)
             {
-                (oomCount, crashCount) = _eventLogService.GetCounts();
+                (oomCount, crashCount, criticalCount) = _eventLogService.GetCounts();
+            }
+
+            List<PingResult>? pingResults = null;
+            if (tick == 1 || tick % PingEveryN == 0)
+            {
+                pingResults = _pingService.Ping();
             }
 
             var siteChecks = _websiteService.GetLatestChecks();
 
             if (IsHandleCreated && !IsDisposed)
             {
-                BeginInvoke(() => UpdateUI(snapshot, processes, netSnaps, diskSnap, siteChecks, oomCount, crashCount));
+                BeginInvoke(() => UpdateUI(snapshot, processes, totalHandles, netSnaps,
+                    diskSnap, tcpSnap, siteChecks, oomCount, crashCount, criticalCount, pingResults));
             }
         }
         catch { }
     }
 
-    private void UpdateUI(SystemSnapshot snap, List<ProcessInfo> processes,
-        List<NetworkSnapshot> netSnaps, DiskSnapshot diskSnap,
-        List<WebsiteCheck> siteChecks, int oomCount, int crashCount)
+    private void UpdateUI(SystemSnapshot snap, List<ProcessInfo> processes, int totalHandles,
+        List<NetworkSnapshot> netSnaps, DiskSnapshot diskSnap, TcpConnectionSnapshot tcpSnap,
+        List<WebsiteCheck> siteChecks, int oomCount, int crashCount, int criticalCount,
+        List<PingResult>? pingResults)
     {
         _ringBuffer.Add(snap);
 
-        // Physical memory + CPU
-        float usedGB = snap.InUseGB + snap.ModifiedMB / 1024f;
-        _physicalLabel.Text = $"Physical: {usedGB:F1} / {snap.TotalGB:F1} GB ({snap.UsedPercent:F1}%)   CPU: {snap.CpuPercent:F0}%";
+        // === LED bar ===
+        _ledBar.LedCpu.SetValue(snap.CpuPercent);
+        _ledBar.LedRam.SetValue(snap.UsedPercent);
+        _ledBar.LedDisk.SetValue(diskSnap.DiskTimePct);
 
-        // Memory bar
-        float totalMB = snap.TotalMB;
-        float inUsePct = totalMB > 0 ? snap.InUseMB / totalMB * 100f : 0;
-        float modPct = totalMB > 0 ? snap.ModifiedMB / totalMB * 100f : 0;
-        float standbyPct = totalMB > 0 ? snap.StandbyMB / totalMB * 100f : 0;
-        _memoryBar.Update(inUsePct, modPct, standbyPct);
+        // Network LEDs — find WAN/DB role snapshots
+        var wanSnap = netSnaps.FirstOrDefault(n => n.Role == NetworkRole.WAN);
+        var dbSnap = netSnaps.FirstOrDefault(n => n.Role == NetworkRole.DB);
 
-        // Commit + balloon + pagefile
+        if (wanSnap.Name != null)
+            _ledBar.LedNetWan.SetValue(NetworkMonitorService.RateToPercent(wanSnap.TotalRateKBps, NetworkRole.WAN));
+        else
+            _ledBar.LedNetWan.SetNoData();
+
+        if (dbSnap.Name != null)
+            _ledBar.LedNetDb.SetValue(NetworkMonitorService.RateToPercent(dbSnap.TotalRateKBps, NetworkRole.DB));
+        else
+            _ledBar.LedNetDb.SetNoData();
+
+        // DB CPU/RAM stay as N/A (placeholders for future DB server monitoring)
+
+        // === Ping ===
+        if (pingResults != null)
+            _lastPingResults = pingResults;
+
+        // === Balloon ===
         var (inflated, reclaimedBytes) = _balloonService.Check(snap.TotalPhysicalBytes);
-        string balloonText = inflated
-            ? $"Balloon: {FormatBytes(reclaimedBytes)} reclaimed"
-            : "Balloon: idle";
-        string pagefileText = snap.PagefileUsagePercent > 0.5f
-            ? $"Pagefile: {snap.PagefileUsagePercent:F0}%"
-            : "Pagefile: idle";
-        string pagingText = snap.PagesOutputPerSec > 10
-            ? $"  Paging: {snap.PagesOutputPerSec:F0}/s"
-            : "";
-        _commitLabel.Text = $"Commit: {snap.CommitUsedGB:F1} / {snap.CommitLimitGB:F1} GB  {balloonText}  {pagefileText}{pagingText}";
         _balloonLabel.Text = _balloonService.DriverDetected
             ? (inflated ? $"Balloon: {FormatBytes(reclaimedBytes)} reclaimed" : "Balloon: idle")
             : "Balloon: not detected";
 
-        // Detail line
-        _detailLabel.Text = $"Standby: {FormatMB(snap.StandbyMB)}  Modified: {FormatMB(snap.ModifiedMB)}  Free: {FormatMB(snap.FreeMB)}  Pools: {FormatMB(snap.PoolNonpagedMB)} NP / {FormatMB(snap.PoolPagedMB)} P";
-
-        // Network
-        if (netSnaps.Count > 0)
+        // === Event counts ===
+        if (oomCount >= 0)
         {
-            var parts = netSnaps.Select(n =>
-                $"{n.Name}: {ArrowUp}{FormatRate(n.SendRateKBps)} {ArrowDown}{FormatRate(n.ReceiveRateKBps)}");
-            _networkLabel.Text = $"Network: {string.Join("  |  ", parts)}";
+            _lastOomCount = oomCount;
+            _lastCrashCount = crashCount;
+            _lastCriticalCount = criticalCount;
         }
+        _oomLabel.Text = $"OOM: {_lastOomCount} | Crashes: {_lastCrashCount} | Critical: {_lastCriticalCount}";
 
-        // Disk
-        _diskLabel.Text = $"Disk: Read {FormatRate(diskSnap.ReadBytesPerSec / 1024)}  Write {FormatRate(diskSnap.WriteBytesPerSec / 1024)}  Active: {diskSnap.DiskTimePct:F0}%";
+        // === Dashboard digest ===
+        _digestPanel.Update(snap, processes, netSnaps, diskSnap, siteChecks,
+            tcpSnap, _lastPingResults, totalHandles,
+            inflated, reclaimedBytes,
+            _lastOomCount, _lastCrashCount, _lastCriticalCount);
 
-        // Websites
-        if (siteChecks.Count > 0)
-        {
-            var siteParts = siteChecks.Select(s =>
-            {
-                if (!s.IsUp)
-                    return $"{s.Name}: DOWN";
-                string time = s.ResponseTimeMs >= 1000
-                    ? $"{s.ResponseTimeMs / 1000.0:F1}s"
-                    : $"{s.ResponseTimeMs}ms";
-                string color = s.ResponseTimeMs > 2000 ? "!" : s.ResponseTimeMs > 500 ? "~" : "";
-                return $"{s.Name}: {time}{color}";
-            });
-            _sitesLabel.Text = $"Sites: {string.Join("  |  ", siteParts)}";
-            _sitesLabel.ForeColor = siteChecks.Any(s => !s.IsUp) ? Color.FromArgb(220, 60, 60)
-                : siteChecks.Any(s => s.ResponseTimeMs > 2000) ? Color.FromArgb(220, 160, 40)
-                : SystemColors.ControlText;
-        }
+        // === Websites panel ===
+        _websitesPanel.Update(siteChecks, _websiteService.GetHistory());
 
-        // Alert: change title bar when system is under pressure
+        // === Alert title bar ===
         bool memPressure = snap.AvailableMB < 500 || snap.UsedPercent > 90;
         bool cpuPressure = snap.CpuPercent > 85;
         bool pagePressure = snap.PagesOutputPerSec > 100;
@@ -182,15 +159,13 @@ public partial class MainForm : Form
             alert += pagePressure ? " [PAGING]" : "";
             alert += siteDown ? " [SITE DOWN]" : "";
             Text = $"Resource Monitor \u2014{alert}";
-            _physicalLabel.ForeColor = Color.FromArgb(220, 60, 60);
         }
         else
         {
             Text = "Resource Monitor";
-            _physicalLabel.ForeColor = SystemColors.ControlText;
         }
 
-        // Process list
+        // === Process list ===
         SortProcesses(processes);
         _processes = processes;
         int newCount = _processes.Count;
@@ -198,19 +173,8 @@ public partial class MainForm : Form
             _processListView.VirtualListSize = newCount;
         _processListView.Invalidate();
 
-        // Graph
+        // === Graph ===
         _graphPanel.Invalidate();
-
-        // Event counts
-        if (oomCount >= 0)
-        {
-            _lastOomCount = oomCount;
-            _lastCrashCount = crashCount;
-        }
-        if (_lastOomCount >= 0)
-        {
-            _oomLabel.Text = $"OOM (48h): {_lastOomCount} | Crashes: {_lastCrashCount}";
-        }
     }
 
     private void SetInterval(int ms)
@@ -218,17 +182,7 @@ public partial class MainForm : Form
         _intervalMs = ms;
         _timer?.Change(0, ms);
         _refreshLabel.Text = $"Refresh: {ms / 1000}s";
-        UpdateIntervalButtons();
-    }
-
-    private void UpdateIntervalButtons()
-    {
-        foreach (var btn in new[] { _btn1s, _btn5s, _btn10s })
-        {
-            bool active = (int)btn.Tag! == _intervalMs;
-            btn.BackColor = active ? Color.FromArgb(60, 120, 200) : SystemColors.Control;
-            btn.ForeColor = active ? Color.White : SystemColors.ControlText;
-        }
+        _ledBar.SetSmoothingWindow(ms);
     }
 
     private void OnRetrieveVirtualItem(object? sender, RetrieveVirtualItemEventArgs e)
@@ -242,13 +196,15 @@ public partial class MainForm : Form
             item.SubItems.Add(FormatBytes(p.PrivateBytes));
             item.SubItems.Add(FormatBytes(p.WorkingSet));
             item.SubItems.Add(FormatCpuTime(p.TotalCpu));
+            item.SubItems.Add(p.HandleCount > 0 ? $"{p.HandleCount:N0}" : "");
             item.SubItems.Add(p.StartTime?.ToString("MM-dd HH:mm") ?? "?");
             item.ForeColor = p.Severity switch
             {
                 ProcessSeverity.Critical => Color.FromArgb(220, 60, 60),
                 ProcessSeverity.Warning => Color.FromArgb(220, 160, 40),
-                _ => SystemColors.WindowText
+                _ => Theme.TextBright
             };
+            item.BackColor = Theme.BgColor;
             e.Item = item;
         }
     }
@@ -275,7 +231,8 @@ public partial class MainForm : Form
             2 => (a, b) => a.CpuPercent.CompareTo(b.CpuPercent),
             4 => (a, b) => a.WorkingSet.CompareTo(b.WorkingSet),
             5 => (a, b) => a.TotalCpu.CompareTo(b.TotalCpu),
-            6 => (a, b) => Nullable.Compare(a.StartTime, b.StartTime),
+            6 => (a, b) => a.HandleCount.CompareTo(b.HandleCount),
+            7 => (a, b) => Nullable.Compare(a.StartTime, b.StartTime),
             _ => (a, b) => a.PrivateBytes.CompareTo(b.PrivateBytes),
         };
         list.Sort(_sortAscending ? cmp : (a, b) => cmp(b, a));
@@ -303,6 +260,7 @@ public partial class MainForm : Form
         {
             var oomEvents = _eventLogService.GetOomEvents();
             var crashEvents = _eventLogService.GetCrashEvents();
+            var criticalEvents = _eventLogService.GetCriticalEvents();
             if (IsHandleCreated && !IsDisposed)
             {
                 BeginInvoke(() =>
@@ -315,6 +273,7 @@ public partial class MainForm : Form
                         item.SubItems.Add(ev.Source);
                         item.SubItems.Add(ev.Message.Length > 200 ? ev.Message[..200] : ev.Message);
                         item.ForeColor = Color.FromArgb(220, 60, 60);
+                        item.BackColor = Theme.BgColor;
                         _eventListView.Items.Add(item);
                     }
                     foreach (var ev in crashEvents.OrderByDescending(e => e.Timestamp))
@@ -324,6 +283,17 @@ public partial class MainForm : Form
                         item.SubItems.Add(ev.Source);
                         item.SubItems.Add(ev.Message.Length > 200 ? ev.Message[..200] : ev.Message);
                         item.ForeColor = Color.FromArgb(220, 160, 40);
+                        item.BackColor = Theme.BgColor;
+                        _eventListView.Items.Add(item);
+                    }
+                    foreach (var ev in criticalEvents.OrderByDescending(e => e.Timestamp))
+                    {
+                        var item = new ListViewItem(ev.Timestamp.ToString("MM-dd HH:mm:ss"));
+                        item.SubItems.Add("Critical");
+                        item.SubItems.Add(ev.Source);
+                        item.SubItems.Add(ev.Message.Length > 200 ? ev.Message[..200] : ev.Message);
+                        item.ForeColor = Color.FromArgb(200, 30, 30);
+                        item.BackColor = Theme.BgColor;
                         _eventListView.Items.Add(item);
                     }
                     _btnRefreshEvents.Text = $"Refresh ({_eventListView.Items.Count} events)";

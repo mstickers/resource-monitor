@@ -7,6 +7,9 @@ public sealed class NetworkMonitorService
 {
     private Dictionary<string, (long Sent, long Recv, DateTime When)> _prev = [];
 
+    public const double WanMaxKBps = 250_000;   // 2 Gbps
+    public const double DbMaxKBps = 1_024_000;  // ~1 GB/s soft cap
+
     public List<NetworkSnapshot> GetSnapshots()
     {
         var now = DateTime.UtcNow;
@@ -38,10 +41,56 @@ public sealed class NetworkMonitorService
             }
             newPrev[name] = (sent, recv, now);
 
-            result.Add(new NetworkSnapshot(name, sent, recv, sendRate, recvRate));
+            var role = ClassifyInterface(nic);
+            result.Add(new NetworkSnapshot(name, sent, recv, sendRate, recvRate, role));
         }
 
         _prev = newPrev;
         return result;
+    }
+
+    public static TcpConnectionSnapshot GetTcpSnapshot()
+    {
+        try
+        {
+            var connections = IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpConnections();
+            int established = 0, timeWait = 0;
+            foreach (var conn in connections)
+            {
+                if (conn.State == TcpState.Established) established++;
+                else if (conn.State == TcpState.TimeWait) timeWait++;
+            }
+            return new TcpConnectionSnapshot(established, timeWait, connections.Length);
+        }
+        catch
+        {
+            return default;
+        }
+    }
+
+    public static float RateToPercent(double totalRateKBps, NetworkRole role)
+    {
+        double max = role == NetworkRole.DB ? DbMaxKBps : WanMaxKBps;
+        return (float)Math.Clamp(totalRateKBps / max * 100.0, 0, 100);
+    }
+
+    private static NetworkRole ClassifyInterface(NetworkInterface nic)
+    {
+        try
+        {
+            foreach (var addr in nic.GetIPProperties().UnicastAddresses)
+            {
+                if (addr.Address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
+                    continue;
+                var bytes = addr.Address.GetAddressBytes();
+                if (bytes[0] == 172 && bytes[1] == 16)
+                    return NetworkRole.DB;
+            }
+            return NetworkRole.WAN;
+        }
+        catch
+        {
+            return NetworkRole.Unknown;
+        }
     }
 }

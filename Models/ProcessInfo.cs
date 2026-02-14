@@ -10,7 +10,8 @@ public readonly record struct ProcessInfo(
     double CpuPercent,
     TimeSpan TotalCpu,
     DateTime? StartTime,
-    ProcessSeverity Severity)
+    ProcessSeverity Severity,
+    int HandleCount = 0)
 {
     public static ProcessSeverity ComputeSeverity(long privateBytes, double cpuPct) =>
         privateBytes > 2L * 1024 * 1024 * 1024 || cpuPct > 80 ? ProcessSeverity.Critical :
