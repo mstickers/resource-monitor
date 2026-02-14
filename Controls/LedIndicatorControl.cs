@@ -13,6 +13,7 @@ public sealed class LedIndicatorControl : Control
     private bool _hasData;
     private string _label = "";
     private Bitmap? _icon;
+    private string? _valueText;
     private const float LerpFactor = 0.3f;
 
     private static readonly Color NoDataColor = Color.FromArgb(60, 60, 65);
@@ -35,11 +36,12 @@ public sealed class LedIndicatorControl : Control
         set { _label = value; Invalidate(); }
     }
 
-    public void SetValue(float percent)
+    public void SetValue(float percent, string? text = null)
     {
         _hasData = true;
         _currentValue = Math.Clamp(percent, 0f, 100f);
         _smoothBuffer.Add(_currentValue.Value);
+        _valueText = text;
         Invalidate();
     }
 
@@ -133,11 +135,11 @@ public sealed class LedIndicatorControl : Control
         // Draw SVG icon centered in LED
         if (_icon != null)
         {
-            int iconSize = ledSize * 2 / 5;
+            int iconSize = ledSize / 2;
             int iconX = ledX + (ledSize - iconSize) / 2;
             int iconY = ledY + (ledSize - iconSize) / 2;
             using var imgAttr = new System.Drawing.Imaging.ImageAttributes();
-            float alpha = _hasData ? 0.7f : 0.3f;
+            float alpha = _hasData ? 0.9f : 0.4f;
             float[][] matrixItems = [
                 [1, 0, 0, 0, 0],
                 [0, 1, 0, 0, 0],
@@ -169,7 +171,7 @@ public sealed class LedIndicatorControl : Control
 
         // Value text
         int valueY = textY + 14;
-        string valueText = _hasData ? $"{_animatedValue:F0}%" : "N/A";
+        string valueText = _hasData ? (_valueText ?? $"{_animatedValue:F0}%") : "N/A";
         using var valueFont = new Font("Consolas", 8.5f, FontStyle.Bold);
         var valueSize = g.MeasureString(valueText, valueFont);
         float valueX = (w - valueSize.Width) / 2f;

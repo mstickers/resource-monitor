@@ -144,21 +144,29 @@ public partial class MainForm : Form
 
         // DB CPU/RAM stay as N/A (placeholders for future DB server monitoring)
 
-        // Website health LED — worst site drives the color
+        // Website health LED — worst site drives the color and label
         if (siteChecks.Count > 0)
         {
             float worstScore = 0;
+            WebsiteCheck? worstSite = null;
             foreach (var site in siteChecks)
             {
                 float score = !site.IsUp ? 95f
                     : site.ResponseTimeMs >= 1000 ? 80f
                     : site.ResponseTimeMs >= 500 ? 65f
-                    : site.ResponseTimeMs >= 200 ? 40f
+                    : site.ResponseTimeMs >= 300 ? 55f
                     : site.ResponseTimeMs >= 80 ? 25f
                     : 5f;
-                if (score > worstScore) worstScore = score;
+                if (score > worstScore) { worstScore = score; worstSite = site; }
             }
-            _ledBar.LedWeb.SetValue(worstScore);
+
+            string? text = null;
+            if (worstSite is { } ws && worstScore > 25f)
+            {
+                string time = !ws.IsUp ? "DOWN" : $"{ws.ResponseTimeMs}ms";
+                text = $"{ws.Name} {time}";
+            }
+            _ledBar.LedWeb.SetValue(worstScore, text);
         }
         else
         {
