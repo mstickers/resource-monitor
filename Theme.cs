@@ -12,7 +12,7 @@ public static class Theme
     public static readonly Color TextLabel = Color.FromArgb(180, 180, 185);
 
     /// <summary>
-    /// Maps a 0–100 percentage to a smooth green→yellow→orange→red gradient.
+    /// Maps a 0–100 percentage to a smooth green→yellow→orange→red→violet gradient.
     /// Used by LEDs and value text throughout the UI.
     /// </summary>
     public static Color PercentToColor(float percent)
@@ -29,19 +29,24 @@ public static class Theme
             float t = (percent - 30f) / 20f;
             return LerpColor(Color.FromArgb(60, 200, 60), Color.FromArgb(220, 220, 40), t);
         }
+        if (percent <= 60f)
+        {
+            float t = (percent - 50f) / 10f;
+            return LerpColor(Color.FromArgb(220, 220, 40), Color.FromArgb(240, 150, 30), t);
+        }
         if (percent <= 70f)
         {
-            float t = (percent - 50f) / 20f;
-            return LerpColor(Color.FromArgb(220, 220, 40), Color.FromArgb(240, 150, 30), t);
+            float t = (percent - 60f) / 10f;
+            return LerpColor(Color.FromArgb(240, 150, 30), Color.FromArgb(220, 50, 40), t);
         }
         if (percent <= 85f)
         {
             float t = (percent - 70f) / 15f;
-            return LerpColor(Color.FromArgb(240, 150, 30), Color.FromArgb(220, 50, 40), t);
+            return LerpColor(Color.FromArgb(220, 50, 40), Color.FromArgb(180, 30, 160), t);
         }
         {
             float t = (percent - 85f) / 15f;
-            return LerpColor(Color.FromArgb(220, 50, 40), Color.FromArgb(180, 20, 30), t);
+            return LerpColor(Color.FromArgb(180, 30, 160), Color.FromArgb(140, 20, 200), t);
         }
     }
 
