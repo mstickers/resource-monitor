@@ -57,7 +57,7 @@ public static class Theme
     /// <summary>Color-code website response times.</summary>
     public static Color WebsiteResponseColor(int ms)
     {
-        if (ms < 0) return Color.FromArgb(220, 50, 40); // DOWN
+        if (ms < 0) return Color.FromArgb(140, 20, 200); // DOWN — deep violet
         if (ms < 80) return Color.FromArgb(50, 200, 60);
         if (ms < 200) return Color.FromArgb(160, 210, 50);
         if (ms < 300) return Color.FromArgb(220, 220, 40);
