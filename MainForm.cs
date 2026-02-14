@@ -152,7 +152,7 @@ public partial class MainForm : Form
             foreach (var site in siteChecks)
             {
                 float score = !site.IsUp ? 95f
-                    : site.ResponseTimeMs >= 1000 ? 80f
+                    : site.ResponseTimeMs >= 1000 ? 90f
                     : site.ResponseTimeMs >= 500 ? 65f
                     : site.ResponseTimeMs >= 300 ? 55f
                     : site.ResponseTimeMs >= 80 ? 25f

@@ -63,7 +63,7 @@ public static class Theme
         if (ms < 300) return Color.FromArgb(220, 220, 40);
         if (ms < 500) return Color.FromArgb(240, 150, 30);
         if (ms < 1000) return Color.FromArgb(220, 80, 40);
-        return Color.FromArgb(220, 50, 40);
+        return Color.FromArgb(180, 30, 160);
     }
 
     public static Color LerpColor(Color a, Color b, float t)
