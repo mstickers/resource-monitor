@@ -9,7 +9,10 @@ public readonly record struct SystemSnapshot(
     ulong CommitUsedBytes,
     ulong CommitLimitBytes,
     float PoolPagedMB,
-    float PoolNonpagedMB)
+    float PoolNonpagedMB,
+    float PagefileUsagePercent,
+    float PagesOutputPerSec,
+    float CpuPercent)
 {
     public float TotalMB => TotalPhysicalBytes / (1024f * 1024f);
     public float TotalGB => TotalPhysicalBytes / (1024f * 1024f * 1024f);

@@ -13,6 +13,9 @@ public sealed class SystemMemoryService : IDisposable
     private readonly PerformanceCounter? _free;
     private readonly PerformanceCounter? _poolPaged;
     private readonly PerformanceCounter? _poolNonpaged;
+    private readonly PerformanceCounter? _pagefileUsage;
+    private readonly PerformanceCounter? _pagesOutput;
+    private readonly PerformanceCounter? _cpuTotal;
     private readonly bool _countersAvailable;
 
     public SystemMemoryService()
@@ -26,6 +29,12 @@ public sealed class SystemMemoryService : IDisposable
             _free = new PerformanceCounter("Memory", "Free & Zero Page List Bytes", true);
             _poolPaged = new PerformanceCounter("Memory", "Pool Paged Bytes", true);
             _poolNonpaged = new PerformanceCounter("Memory", "Pool Nonpaged Bytes", true);
+            _pagefileUsage = new PerformanceCounter("Paging File", "% Usage", "_Total", true);
+            _pagesOutput = new PerformanceCounter("Memory", "Pages Output/sec", true);
+            _cpuTotal = new PerformanceCounter("Processor", "% Processor Time", "_Total", true);
+            // Prime rate-based counters (first read returns 0)
+            _pagesOutput.NextValue();
+            _cpuTotal.NextValue();
             _countersAvailable = true;
         }
         catch
@@ -41,6 +50,7 @@ public sealed class SystemMemoryService : IDisposable
 
         float standbyMB = 0, modifiedMB = 0, freeMB = 0;
         float poolPagedMB = 0, poolNonpagedMB = 0;
+        float pagefilePct = 0, pagesOutSec = 0, cpuPct = 0;
 
         if (_countersAvailable)
         {
@@ -54,10 +64,12 @@ public sealed class SystemMemoryService : IDisposable
                 freeMB = _free!.NextValue() / (1024f * 1024f);
                 poolPagedMB = _poolPaged!.NextValue() / (1024f * 1024f);
                 poolNonpagedMB = _poolNonpaged!.NextValue() / (1024f * 1024f);
+                pagefilePct = _pagefileUsage!.NextValue();
+                pagesOutSec = _pagesOutput!.NextValue();
+                cpuPct = _cpuTotal!.NextValue();
             }
             catch
             {
-                // Fall back to basic calculation
                 standbyMB = 0;
                 modifiedMB = 0;
                 freeMB = mem.ullAvailPhys / (1024f * 1024f);
@@ -79,7 +91,10 @@ public sealed class SystemMemoryService : IDisposable
             CommitUsedBytes: commitUsed,
             CommitLimitBytes: mem.ullTotalPageFile,
             PoolPagedMB: poolPagedMB,
-            PoolNonpagedMB: poolNonpagedMB);
+            PoolNonpagedMB: poolNonpagedMB,
+            PagefileUsagePercent: pagefilePct,
+            PagesOutputPerSec: pagesOutSec,
+            CpuPercent: cpuPct);
     }
 
     public void Dispose()
@@ -91,6 +106,9 @@ public sealed class SystemMemoryService : IDisposable
         _free?.Dispose();
         _poolPaged?.Dispose();
         _poolNonpaged?.Dispose();
+        _pagefileUsage?.Dispose();
+        _pagesOutput?.Dispose();
+        _cpuTotal?.Dispose();
     }
 
     [StructLayout(LayoutKind.Sequential)]

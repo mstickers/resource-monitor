@@ -2,26 +2,52 @@ using ResourceMonitor.Controls;
 
 namespace ResourceMonitor;
 
+/// <summary>Double-buffered ListView to eliminate flicker in virtual mode.</summary>
+internal sealed class BufferedListView : ListView
+{
+    public BufferedListView()
+    {
+        SetStyle(ControlStyles.OptimizedDoubleBuffer
+            | ControlStyles.AllPaintingInWmPaint, true);
+    }
+}
+
 partial class MainForm
 {
     private System.ComponentModel.IContainer components = null;
 
+    // Top panel
     private Panel _topPanel;
     private Label _titleLabel;
     private Label _physicalLabel;
     private Label _commitLabel;
     private Label _detailLabel;
+    private Label _networkLabel;
+    private Label _diskLabel;
+    private Label _sitesLabel;
     private MemoryBarControl _memoryBar;
+    private Button _btn1s, _btn5s, _btn10s;
+
+    // Tabs
+    private TabControl _tabControl;
+    private TabPage _tabDashboard, _tabProcesses, _tabEvents;
+
+    // Dashboard tab
     private MemoryGraphPanel _graphPanel;
-    private ListView _processListView;
+
+    // Processes tab
+    private BufferedListView _processListView;
+    private ContextMenuStrip _processContextMenu;
+
+    // Events tab
+    private BufferedListView _eventListView;
+    private Button _btnRefreshEvents;
+
+    // Status
     private StatusStrip _statusStrip;
     private ToolStripStatusLabel _refreshLabel;
     private ToolStripStatusLabel _balloonLabel;
     private ToolStripStatusLabel _oomLabel;
-    private Button _btn1s;
-    private Button _btn5s;
-    private Button _btn10s;
-    private ContextMenuStrip _processContextMenu;
 
     protected override void Dispose(bool disposing)
     {
@@ -29,6 +55,8 @@ partial class MainForm
         {
             components?.Dispose();
             _memoryService?.Dispose();
+            _diskService?.Dispose();
+            _websiteService?.Dispose();
             _timer?.Dispose();
         }
         base.Dispose(disposing);
@@ -39,11 +67,11 @@ partial class MainForm
         components = new System.ComponentModel.Container();
         SuspendLayout();
 
-        // === Top Panel ===
+        // === Top Panel (always visible) ===
         _topPanel = new Panel
         {
             Dock = DockStyle.Top,
-            Height = 130,
+            Height = 186,
             Padding = new Padding(12, 8, 12, 4)
         };
 
@@ -55,7 +83,6 @@ partial class MainForm
             AutoSize = true
         };
 
-        // Interval buttons
         _btn1s = CreateIntervalButton("1s", 1000, new Point(370, 8));
         _btn5s = CreateIntervalButton("5s", 5000, new Point(414, 8));
         _btn10s = CreateIntervalButton("10s", 10000, new Point(458, 8));
@@ -91,37 +118,96 @@ partial class MainForm
             AutoSize = true
         };
 
-        _topPanel.Controls.AddRange([_titleLabel, _btn1s, _btn5s, _btn10s,
-            _physicalLabel, _memoryBar, _commitLabel, _detailLabel]);
-
-        // === Process ListView ===
-        _processListView = new ListView
+        _networkLabel = new Label
         {
-            Dock = DockStyle.Bottom,
-            Height = 250,
+            Text = "Network: ...",
+            Font = new Font("Segoe UI", 9f),
+            Location = new Point(12, 122),
+            AutoSize = true
+        };
+
+        _diskLabel = new Label
+        {
+            Text = "Disk: ...",
+            Font = new Font("Segoe UI", 9f),
+            Location = new Point(12, 142),
+            AutoSize = true
+        };
+
+        _sitesLabel = new Label
+        {
+            Text = "Sites: waiting...",
+            Font = new Font("Segoe UI", 9f),
+            Location = new Point(12, 162),
+            AutoSize = true
+        };
+
+        _topPanel.Controls.AddRange([_titleLabel, _btn1s, _btn5s, _btn10s,
+            _physicalLabel, _memoryBar, _commitLabel, _detailLabel,
+            _networkLabel, _diskLabel, _sitesLabel]);
+
+        // === Tab Control ===
+        _tabControl = new TabControl { Dock = DockStyle.Fill };
+
+        // --- Dashboard tab ---
+        _tabDashboard = new TabPage("Dashboard");
+        _graphPanel = new MemoryGraphPanel { Dock = DockStyle.Fill };
+        _tabDashboard.Controls.Add(_graphPanel);
+
+        // --- Processes tab ---
+        _tabProcesses = new TabPage("Processes");
+        _processListView = new BufferedListView
+        {
+            Dock = DockStyle.Fill,
             View = View.Details,
             FullRowSelect = true,
             VirtualMode = true,
             VirtualListSize = 0,
             Font = new Font("Consolas", 9f),
-            BorderStyle = BorderStyle.FixedSingle
+            BorderStyle = BorderStyle.None
         };
-        _processListView.Columns.Add("PID", 70, HorizontalAlignment.Right);
-        _processListView.Columns.Add("Name", 220, HorizontalAlignment.Left);
-        _processListView.Columns.Add("Private", 100, HorizontalAlignment.Right);
-        _processListView.Columns.Add("WorkingSet", 100, HorizontalAlignment.Right);
+        _processListView.Columns.Add("PID", 60, HorizontalAlignment.Right);
+        _processListView.Columns.Add("Name", 180, HorizontalAlignment.Left);
+        _processListView.Columns.Add("CPU %", 60, HorizontalAlignment.Right);
+        _processListView.Columns.Add("Private", 90, HorizontalAlignment.Right);
+        _processListView.Columns.Add("WorkingSet", 90, HorizontalAlignment.Right);
+        _processListView.Columns.Add("Total CPU", 80, HorizontalAlignment.Right);
+        _processListView.Columns.Add("Started", 100, HorizontalAlignment.Left);
         _processListView.RetrieveVirtualItem += OnRetrieveVirtualItem;
         _processListView.ColumnClick += OnColumnClick;
 
         _processContextMenu = new ContextMenuStrip(components);
         _processContextMenu.Items.Add("Kill Process", null, OnKillProcess);
         _processListView.ContextMenuStrip = _processContextMenu;
+        _tabProcesses.Controls.Add(_processListView);
 
-        // === Graph Panel ===
-        _graphPanel = new MemoryGraphPanel
+        // --- Events tab ---
+        _tabEvents = new TabPage("Events");
+        _eventListView = new BufferedListView
         {
-            Dock = DockStyle.Fill
+            Dock = DockStyle.Fill,
+            View = View.Details,
+            FullRowSelect = true,
+            Font = new Font("Consolas", 9f),
+            BorderStyle = BorderStyle.None
         };
+        _eventListView.Columns.Add("Time", 130, HorizontalAlignment.Left);
+        _eventListView.Columns.Add("Type", 100, HorizontalAlignment.Left);
+        _eventListView.Columns.Add("Source", 150, HorizontalAlignment.Left);
+        _eventListView.Columns.Add("Details", 400, HorizontalAlignment.Left);
+
+        _btnRefreshEvents = new Button
+        {
+            Text = "Refresh",
+            Dock = DockStyle.Bottom,
+            Height = 28,
+            FlatStyle = FlatStyle.Flat
+        };
+        _btnRefreshEvents.Click += OnRefreshEvents;
+        _tabEvents.Controls.Add(_eventListView);
+        _tabEvents.Controls.Add(_btnRefreshEvents);
+
+        _tabControl.TabPages.AddRange([_tabDashboard, _tabProcesses, _tabEvents]);
 
         // === Status Strip ===
         _statusStrip = new StatusStrip();
@@ -131,16 +217,15 @@ partial class MainForm
         _statusStrip.Items.AddRange([_refreshLabel, _balloonLabel, _oomLabel]);
 
         // === Form layout ===
-        // Add order determines Z-order; highest Z (last added) is laid out first
-        Controls.Add(_graphPanel);        // Z=0, Fill, laid out last
-        Controls.Add(_processListView);   // Z=1, Bottom, laid out 3rd
-        Controls.Add(_topPanel);          // Z=2, Top, laid out 2nd
-        Controls.Add(_statusStrip);       // Z=3, Bottom, laid out 1st
+        Controls.Add(_tabControl);     // Fill — laid out last
+        Controls.Add(_topPanel);       // Top — laid out second
+        Controls.Add(_statusStrip);    // Bottom — laid out first
 
         // === Form properties ===
+        DoubleBuffered = true;
         Text = "Resource Monitor";
-        MinimumSize = new Size(600, 500);
-        ClientSize = new Size(800, 700);
+        MinimumSize = new Size(700, 550);
+        ClientSize = new Size(900, 750);
         StartPosition = FormStartPosition.CenterScreen;
         Font = new Font("Segoe UI", 9f);
 
