@@ -4,14 +4,41 @@ using ResourceMonitor.Helpers;
 
 namespace ResourceMonitor;
 
-/// <summary>Double-buffered ListView to eliminate flicker in virtual mode.</summary>
+/// <summary>Double-buffered dark-themed ListView with owner-drawn column headers.</summary>
 internal sealed class BufferedListView : ListView
 {
     public BufferedListView()
     {
         SetStyle(ControlStyles.OptimizedDoubleBuffer
             | ControlStyles.AllPaintingInWmPaint, true);
+        OwnerDraw = true;
+        DrawColumnHeader += OnDrawColumnHeader;
+        DrawItem += OnDrawItem;
+        DrawSubItem += OnDrawSubItem;
     }
+
+    private static void OnDrawColumnHeader(object? sender, DrawListViewColumnHeaderEventArgs e)
+    {
+        using var bgBrush = new SolidBrush(Color.FromArgb(35, 35, 40));
+        e.Graphics.FillRectangle(bgBrush, e.Bounds);
+
+        using var borderPen = new Pen(Theme.Border);
+        e.Graphics.DrawLine(borderPen, e.Bounds.Right - 1, e.Bounds.Y, e.Bounds.Right - 1, e.Bounds.Bottom);
+        e.Graphics.DrawLine(borderPen, e.Bounds.X, e.Bounds.Bottom - 1, e.Bounds.Right, e.Bounds.Bottom - 1);
+
+        var flags = TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix;
+        flags |= e.Header!.TextAlign switch
+        {
+            HorizontalAlignment.Right => TextFormatFlags.Right,
+            HorizontalAlignment.Center => TextFormatFlags.HorizontalCenter,
+            _ => TextFormatFlags.Left
+        };
+        var textRect = new Rectangle(e.Bounds.X + 4, e.Bounds.Y, e.Bounds.Width - 8, e.Bounds.Height);
+        TextRenderer.DrawText(e.Graphics, e.Header.Text, e.Font, textRect, Theme.TextLabel, flags);
+    }
+
+    private static void OnDrawItem(object? sender, DrawListViewItemEventArgs e) => e.DrawDefault = true;
+    private static void OnDrawSubItem(object? sender, DrawListViewSubItemEventArgs e) => e.DrawDefault = true;
 }
 
 partial class MainForm

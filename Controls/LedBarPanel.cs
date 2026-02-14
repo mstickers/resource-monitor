@@ -10,6 +10,7 @@ public sealed class LedBarPanel : Control
     public LedIndicatorControl LedDisk { get; }
     public LedIndicatorControl LedNetWan { get; }
     public LedIndicatorControl LedNetDb { get; }
+    public LedIndicatorControl LedWeb { get; }
     public LedIndicatorControl LedDbCpu { get; }
     public LedIndicatorControl LedDbRam { get; }
 
@@ -32,13 +33,15 @@ public sealed class LedBarPanel : Control
         LedDisk = new LedIndicatorControl { Label = "Disk" };
         LedNetWan = new LedIndicatorControl { Label = "WAN" };
         LedNetDb = new LedIndicatorControl { Label = "DB" };
+        LedWeb = new LedIndicatorControl { Label = "Web" };
         LedDbCpu = new LedIndicatorControl { Label = "DB CPU" };
         LedDbRam = new LedIndicatorControl { Label = "DB RAM" };
 
+        LedWeb.SetNoData();
         LedDbCpu.SetNoData();
         LedDbRam.SetNoData();
 
-        _leds = [LedCpu, LedRam, LedDisk, LedNetWan, LedNetDb, LedDbCpu, LedDbRam];
+        _leds = [LedCpu, LedRam, LedDisk, LedNetWan, LedNetDb, LedWeb, LedDbCpu, LedDbRam];
 
         _btn1s = CreateButton("1s", 1000);
         _btn5s = CreateButton("5s", 5000);
@@ -60,7 +63,7 @@ public sealed class LedBarPanel : Control
         [
             (LedCpu, "cpu"), (LedRam, "ram"), (LedDisk, "disk"),
             (LedNetWan, "wan"), (LedNetDb, "db"),
-            (LedDbCpu, "db-cpu"), (LedDbRam, "db-ram")
+            (LedWeb, "web"), (LedDbCpu, "db-cpu"), (LedDbRam, "db-ram")
         ];
         foreach (var (led, name) in mapping)
         {
