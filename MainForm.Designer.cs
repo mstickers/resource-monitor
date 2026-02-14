@@ -17,6 +17,18 @@ internal sealed class BufferedListView : ListView
         DrawColumnHeader += OnDrawColumnHeader;
         DrawItem += OnDrawItem;
         DrawSubItem += OnDrawSubItem;
+        Resize += (_, _) => FillLastColumn();
+    }
+
+    private void FillLastColumn()
+    {
+        if (Columns.Count == 0) return;
+        int usedWidth = 0;
+        for (int i = 0; i < Columns.Count - 1; i++)
+            usedWidth += Columns[i].Width;
+        int remaining = ClientSize.Width - usedWidth;
+        if (remaining > 50)
+            Columns[Columns.Count - 1].Width = remaining;
     }
 
     protected override void OnHandleCreated(EventArgs e)

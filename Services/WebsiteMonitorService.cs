@@ -12,6 +12,7 @@ public sealed class WebsiteMonitorService : IDisposable
     private readonly object _lock = new();
     private System.Threading.Timer? _timer;
     private int _currentIndex = -1;
+    private int _intervalSeconds = 60;
 
     public WebsiteMonitorService()
     {
@@ -62,6 +63,7 @@ public sealed class WebsiteMonitorService : IDisposable
     /// <summary>Start staggered checks. Spreads N sites evenly across the interval.</summary>
     public void Start(int intervalSeconds = 60)
     {
+        _intervalSeconds = intervalSeconds;
         if (_sites.Count == 0) return;
         int staggerMs = intervalSeconds * 1000 / _sites.Count;
         // Start first check after a short delay
@@ -123,6 +125,20 @@ public sealed class WebsiteMonitorService : IDisposable
         {
             return new Dictionary<string, RingBuffer<WebsiteCheck>>(_history);
         }
+    }
+
+    public int GetSecondsUntilNextCheck(string name)
+    {
+        lock (_lock)
+        {
+            if (_lastChecks.TryGetValue(name, out var check))
+            {
+                var nextCheck = check.Timestamp.AddSeconds(_intervalSeconds);
+                int remaining = (int)(nextCheck - DateTime.Now).TotalSeconds;
+                return Math.Max(0, remaining);
+            }
+        }
+        return -1; // not yet checked
     }
 
     public void Dispose()

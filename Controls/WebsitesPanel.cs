@@ -8,6 +8,7 @@ public sealed class WebsitesPanel : Control
 {
     private List<WebsiteCheck> _checks = [];
     private Dictionary<string, RingBuffer<WebsiteCheck>> _history = [];
+    private Dictionary<string, int> _countdowns = [];
 
     private static readonly Font TitleFont = new("Segoe UI", 10f, FontStyle.Bold);
     private static readonly Font LabelFont = new("Segoe UI", 9f);
@@ -23,10 +24,12 @@ public sealed class WebsitesPanel : Control
         BackColor = Theme.BgColor;
     }
 
-    public void Update(List<WebsiteCheck> checks, Dictionary<string, RingBuffer<WebsiteCheck>> history)
+    public void Update(List<WebsiteCheck> checks, Dictionary<string, RingBuffer<WebsiteCheck>> history,
+        Dictionary<string, int> countdowns)
     {
         _checks = checks;
         _history = history;
+        _countdowns = countdowns;
         Invalidate();
     }
 
@@ -58,7 +61,8 @@ public sealed class WebsitesPanel : Control
         int colName = pad;
         int colStatus = 180;
         int colTime = 260;
-        int colLastCheck = 360;
+        int colLastCheck = 350;
+        int colNext = 440;
         int colSparkline = 500;
 
         using var headerBrush = new SolidBrush(Theme.TextDim);
@@ -66,6 +70,7 @@ public sealed class WebsitesPanel : Control
         g.DrawString("Status", SmallFont, headerBrush, colStatus, y);
         g.DrawString("Response", SmallFont, headerBrush, colTime, y);
         g.DrawString("Last Check", SmallFont, headerBrush, colLastCheck, y);
+        g.DrawString("Next", SmallFont, headerBrush, colNext, y);
         g.DrawString("History (last 60)", SmallFont, headerBrush, colSparkline, y);
         y += 18;
 
@@ -112,6 +117,15 @@ public sealed class WebsitesPanel : Control
             // Last check time
             using var checkBrush = new SolidBrush(Theme.TextDim);
             g.DrawString(site.Timestamp.ToString("HH:mm:ss"), LabelFont, checkBrush, colLastCheck, y + 4);
+
+            // Next check countdown
+            if (_countdowns.TryGetValue(site.Name, out int secs) && secs >= 0)
+            {
+                string countdownText = secs > 0 ? $"{secs}s" : "now";
+                var countdownColor = secs <= 5 ? Theme.TextBright : Theme.TextDim;
+                using var cdBrush = new SolidBrush(countdownColor);
+                g.DrawString(countdownText, LabelFont, cdBrush, colNext, y + 4);
+            }
 
             // Sparkline
             if (_history.TryGetValue(site.Name, out var buf) && buf.Count >= 2)

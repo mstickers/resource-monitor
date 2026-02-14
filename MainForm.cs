@@ -160,13 +160,7 @@ public partial class MainForm : Form
                 if (score > worstScore) { worstScore = score; worstSite = site; }
             }
 
-            string? text = null;
-            if (worstSite is { } ws && worstScore > 25f)
-            {
-                string time = !ws.IsUp ? "DOWN" : $"{ws.ResponseTimeMs}ms";
-                text = $"{ws.Name} {time}";
-            }
-            _ledBar.LedWeb.SetValue(worstScore, text);
+            _ledBar.LedWeb.SetValue(worstScore);
         }
         else
         {
@@ -206,7 +200,10 @@ public partial class MainForm : Form
         _memoryPanel.Update(snap, _ramTracker, processes, inflated, reclaimedBytes);
 
         // === Websites panel ===
-        _websitesPanel.Update(siteChecks, _websiteService.GetHistory());
+        var countdowns = new Dictionary<string, int>();
+        foreach (var site in siteChecks)
+            countdowns[site.Name] = _websiteService.GetSecondsUntilNextCheck(site.Name);
+        _websitesPanel.Update(siteChecks, _websiteService.GetHistory(), countdowns);
 
         // === Alert title bar ===
         bool memPressure = snap.AvailableMB < 500 || snap.UsedPercent > 90;
