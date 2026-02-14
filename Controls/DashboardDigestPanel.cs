@@ -19,6 +19,8 @@ public sealed class DashboardDigestPanel : Control
     private long _balloonReclaimed;
     private int _oomCount, _crashCount, _criticalCount;
     private bool _hasData;
+    private RingBuffer<SystemSnapshot>? _ringBuffer;
+    private ProcessIoSnapshot? _topIo;
 
     private static readonly Font TitleFont = new("Segoe UI", 9.5f, FontStyle.Bold);
     private static readonly Font LabelFont = new("Segoe UI", 8.5f);
@@ -34,12 +36,15 @@ public sealed class DashboardDigestPanel : Control
         BackColor = Theme.BgColor;
     }
 
+    public void SetBuffer(RingBuffer<SystemSnapshot> buffer) => _ringBuffer = buffer;
+
     public void Update(SystemSnapshot snap, List<ProcessInfo> processes,
         List<NetworkSnapshot> netSnaps, DiskSnapshot diskSnap,
         List<WebsiteCheck> siteChecks, TcpConnectionSnapshot tcpSnap,
         List<PingResult> pingResults, int totalHandles,
         bool balloonInflated, long balloonReclaimed,
-        int oomCount, int crashCount, int criticalCount)
+        int oomCount, int crashCount, int criticalCount,
+        ProcessIoSnapshot? topIo = null)
     {
         _snap = snap;
         _processes = processes;
@@ -54,6 +59,7 @@ public sealed class DashboardDigestPanel : Control
         _oomCount = oomCount;
         _crashCount = crashCount;
         _criticalCount = criticalCount;
+        _topIo = topIo;
         _hasData = true;
         Invalidate();
     }
@@ -109,6 +115,10 @@ public sealed class DashboardDigestPanel : Control
     private void DrawMemoryCard(Graphics g, Rectangle r)
     {
         DrawCardBackground(g, r, "Memory");
+
+        // Draw sparkline at bottom of card
+        DrawMiniSparkline(g, r, i => _ringBuffer?[i].UsedPercent ?? 0, Theme.PercentToColor(_snap.UsedPercent));
+
         int y = r.Y + 26;
         int x = r.X + 10;
 
@@ -126,10 +136,14 @@ public sealed class DashboardDigestPanel : Control
         DrawLabelValue(g, x, y, "Pagefile:", $"{_snap.PagefileUsagePercent:F0}%",
             _snap.PagefileUsagePercent > 50 ? Theme.PercentToColor(_snap.PagefileUsagePercent) : Theme.TextDim);
         y += 18;
-        if (_snap.PagesOutputPerSec > 10)
-            DrawLabelValue(g, x, y, "Paging:", $"{_snap.PagesOutputPerSec:F0}/s", Color.FromArgb(240, 150, 30));
-        else
-            DrawLabelValue(g, x, y, "Paging:", "idle", Theme.TextDim);
+
+        // Memory offender
+        var topMem = _processes.OrderByDescending(p => p.PrivateBytes).FirstOrDefault();
+        if (topMem.Name != null)
+        {
+            var offColor = Theme.PercentToColor((float)Math.Min(topMem.PrivateBytes / (1024.0 * 1024 * 1024) * 30, 100));
+            DrawLabelValue(g, x, y, "Top:", $"{topMem.Name} ({FormatBytes(topMem.PrivateBytes)})", offColor);
+        }
         y += 18;
         DrawLabelValue(g, x, y, "Pools:", $"{FormatMB(_snap.PoolNonpagedMB)} NP / {FormatMB(_snap.PoolPagedMB)} P", Theme.TextDim);
     }
@@ -137,6 +151,10 @@ public sealed class DashboardDigestPanel : Control
     private void DrawCpuCard(Graphics g, Rectangle r)
     {
         DrawCardBackground(g, r, "CPU & Processes");
+
+        // Draw sparkline at bottom
+        DrawMiniSparkline(g, r, i => _ringBuffer?[i].CpuPercent ?? 0, Theme.PercentToColor(_snap.CpuPercent));
+
         int y = r.Y + 26;
         int x = r.X + 10;
 
@@ -205,6 +223,14 @@ public sealed class DashboardDigestPanel : Control
     private void DrawDiskCard(Graphics g, Rectangle r)
     {
         DrawCardBackground(g, r, "Disk");
+
+        // Sparkline for disk active %
+        DrawMiniSparkline(g, r, i =>
+        {
+            // Disk % not in SystemSnapshot — use last known value for most recent
+            return _diskSnap.DiskTimePct;
+        }, Theme.PercentToColor(_diskSnap.DiskTimePct));
+
         int y = r.Y + 26;
         int x = r.X + 10;
 
@@ -214,6 +240,14 @@ public sealed class DashboardDigestPanel : Control
         DrawLabelValue(g, x, y, "Write:", FormatRate(_diskSnap.WriteBytesPerSec / 1024), Theme.TextDim);
         y += 18;
         DrawLabelValue(g, x, y, "Active:", $"{_diskSnap.DiskTimePct:F0}%", diskColor);
+        y += 18;
+
+        // Disk offender
+        if (_topIo is { } io && io.TotalRateKBps > 1)
+        {
+            DrawLabelValue(g, x, y, "Top I/O:", $"{io.Name} ({FormatRate(io.TotalRateKBps)})",
+                Color.FromArgb(220, 180, 60));
+        }
     }
 
     private void DrawWebsitesCard(Graphics g, Rectangle r)
@@ -262,6 +296,42 @@ public sealed class DashboardDigestPanel : Control
         y += 18;
         DrawLabelValue(g, x, y, "Critical:", $"{_criticalCount}",
             _criticalCount > 0 ? Color.FromArgb(220, 50, 40) : Color.FromArgb(50, 200, 60));
+    }
+
+    private void DrawMiniSparkline(Graphics g, Rectangle card, Func<int, float> getValue, Color lineColor)
+    {
+        if (_ringBuffer == null || _ringBuffer.Count < 2) return;
+
+        int samples = Math.Min(_ringBuffer.Count, 60);
+        int startIdx = _ringBuffer.Count - samples;
+        int sparkH = 60;
+        int sparkY = card.Bottom - sparkH - 4;
+        int sparkX = card.X + 4;
+        int sparkW = card.Width - 8;
+
+        if (sparkW < 10) return;
+
+        float xStep = (float)sparkW / (samples - 1);
+        var pts = new PointF[samples];
+        for (int i = 0; i < samples; i++)
+        {
+            float val = Math.Clamp(getValue(startIdx + i), 0, 100);
+            pts[i] = new PointF(sparkX + i * xStep, sparkY + sparkH * (1f - val / 100f));
+        }
+
+        // Fill area
+        var poly = new PointF[samples + 2];
+        Array.Copy(pts, poly, samples);
+        poly[samples] = new PointF(pts[^1].X, sparkY + sparkH);
+        poly[samples + 1] = new PointF(pts[0].X, sparkY + sparkH);
+        using var fillBrush = new SolidBrush(Color.FromArgb(25, lineColor));
+        g.FillPolygon(fillBrush, poly);
+
+        // Line
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        using var pen = new Pen(Color.FromArgb(80, lineColor), 1.2f);
+        g.DrawLines(pen, pts);
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.None;
     }
 
     private void DrawLabelValue(Graphics g, int x, int y, string label, string value, Color valueColor)

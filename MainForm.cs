@@ -15,7 +15,12 @@ public partial class MainForm : Form
     private readonly DiskMonitorService _diskService = new();
     private readonly WebsiteMonitorService _websiteService = new();
     private readonly PingMonitorService _pingService = new();
+    private readonly ProcessIoService _ioService = new();
     private readonly RingBuffer<SystemSnapshot> _ringBuffer = new(600);
+
+    private readonly MetricTracker _cpuTracker = new();
+    private readonly MetricTracker _ramTracker = new();
+    private readonly MetricTracker _diskTracker = new();
 
     private System.Threading.Timer? _timer;
     private int _intervalMs = 1000;
@@ -30,13 +35,19 @@ public partial class MainForm : Form
     private int _lastCrashCount;
     private int _lastCriticalCount;
     private List<PingResult> _lastPingResults = [];
+    private ProcessIoSnapshot? _lastTopIo;
 
     public MainForm()
     {
         InitializeComponent();
         _graphPanel.SetBuffer(_ringBuffer);
+        _memoryPanel.SetBuffer(_ringBuffer);
+        _digestPanel.SetBuffer(_ringBuffer);
 
-        // Load website config
+        // Try IIS auto-discovery first
+        _websiteService.LoadFromIis();
+
+        // Load website config (overrides/merges with IIS)
         string configDir = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "config");
         string configPath = Path.Combine(configDir, "websites.txt");
         if (!File.Exists(configPath))
@@ -45,6 +56,8 @@ public partial class MainForm : Form
 
         Load += (_, _) =>
         {
+            EnableDarkTitleBar();
+
             _balloonLabel.Text = _balloonService.DriverDetected
                 ? "Balloon: detected"
                 : "Balloon: not detected";
@@ -80,12 +93,16 @@ public partial class MainForm : Form
                 pingResults = _pingService.Ping();
             }
 
+            // I/O tracking (every tick, but lightweight)
+            ProcessIoSnapshot? topIo = null;
+            try { topIo = _ioService.GetTopIoProcess(); } catch { }
+
             var siteChecks = _websiteService.GetLatestChecks();
 
             if (IsHandleCreated && !IsDisposed)
             {
                 BeginInvoke(() => UpdateUI(snapshot, processes, totalHandles, netSnaps,
-                    diskSnap, tcpSnap, siteChecks, oomCount, crashCount, criticalCount, pingResults));
+                    diskSnap, tcpSnap, siteChecks, oomCount, crashCount, criticalCount, pingResults, topIo));
             }
         }
         catch { }
@@ -94,9 +111,17 @@ public partial class MainForm : Form
     private void UpdateUI(SystemSnapshot snap, List<ProcessInfo> processes, int totalHandles,
         List<NetworkSnapshot> netSnaps, DiskSnapshot diskSnap, TcpConnectionSnapshot tcpSnap,
         List<WebsiteCheck> siteChecks, int oomCount, int crashCount, int criticalCount,
-        List<PingResult>? pingResults)
+        List<PingResult>? pingResults, ProcessIoSnapshot? topIo)
     {
         _ringBuffer.Add(snap);
+
+        // Record metrics for statistics
+        _cpuTracker.Record(snap.CpuPercent);
+        _ramTracker.Record(snap.UsedPercent);
+        _diskTracker.Record(diskSnap.DiskTimePct);
+
+        if (topIo != null)
+            _lastTopIo = topIo;
 
         // === LED bar ===
         _ledBar.LedCpu.SetValue(snap.CpuPercent);
@@ -142,7 +167,14 @@ public partial class MainForm : Form
         _digestPanel.Update(snap, processes, netSnaps, diskSnap, siteChecks,
             tcpSnap, _lastPingResults, totalHandles,
             inflated, reclaimedBytes,
-            _lastOomCount, _lastCrashCount, _lastCriticalCount);
+            _lastOomCount, _lastCrashCount, _lastCriticalCount, _lastTopIo);
+
+        // === CPU detail panel ===
+        _cpuPanel.Update(snap.CpuPercent, _cpuTracker, _diskTracker,
+            processes, diskSnap, netSnaps, tcpSnap, _lastPingResults, _lastTopIo);
+
+        // === Memory detail panel ===
+        _memoryPanel.Update(snap, _ramTracker, processes, inflated, reclaimedBytes);
 
         // === Websites panel ===
         _websitesPanel.Update(siteChecks, _websiteService.GetHistory());

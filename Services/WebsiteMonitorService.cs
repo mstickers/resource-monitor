@@ -45,6 +45,20 @@ public sealed class WebsiteMonitorService : IDisposable
 
     public int SiteCount => _sites.Count;
 
+    public void LoadFromIis()
+    {
+        var iisSites = IisDiscoveryService.GetIisSites();
+        var existingUrls = new HashSet<string>(_sites.Select(s => s.Url), StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (name, url) in iisSites)
+        {
+            if (existingUrls.Contains(url)) continue;
+            _sites.Add((name, url));
+            _history[name] = new RingBuffer<WebsiteCheck>(60);
+            existingUrls.Add(url);
+        }
+    }
+
     /// <summary>Start staggered checks. Spreads N sites evenly across the interval.</summary>
     public void Start(int intervalSeconds = 60)
     {

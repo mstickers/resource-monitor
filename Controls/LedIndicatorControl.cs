@@ -12,6 +12,7 @@ public sealed class LedIndicatorControl : Control
     private float? _currentValue;
     private bool _hasData;
     private string _label = "";
+    private Bitmap? _icon;
     private const float LerpFactor = 0.3f;
 
     private static readonly Color NoDataColor = Color.FromArgb(60, 60, 65);
@@ -39,6 +40,12 @@ public sealed class LedIndicatorControl : Control
         _hasData = true;
         _currentValue = Math.Clamp(percent, 0f, 100f);
         _smoothBuffer.Add(_currentValue.Value);
+        Invalidate();
+    }
+
+    public void SetIcon(Bitmap icon)
+    {
+        _icon = icon;
         Invalidate();
     }
 
@@ -122,6 +129,26 @@ public sealed class LedIndicatorControl : Control
                 ledRect.Y + ledRect.Height * 0.38f)
         };
         g.FillEllipse(ledBrush, ledRect);
+
+        // Draw SVG icon centered in LED
+        if (_icon != null)
+        {
+            int iconSize = ledSize * 2 / 5;
+            int iconX = ledX + (ledSize - iconSize) / 2;
+            int iconY = ledY + (ledSize - iconSize) / 2;
+            using var imgAttr = new System.Drawing.Imaging.ImageAttributes();
+            float alpha = _hasData ? 0.7f : 0.3f;
+            float[][] matrixItems = [
+                [1, 0, 0, 0, 0],
+                [0, 1, 0, 0, 0],
+                [0, 0, 1, 0, 0],
+                [0, 0, 0, alpha, 0],
+                [0, 0, 0, 0, 1]
+            ];
+            imgAttr.SetColorMatrix(new System.Drawing.Imaging.ColorMatrix(matrixItems));
+            g.DrawImage(_icon, new Rectangle(iconX, iconY, iconSize, iconSize),
+                0, 0, _icon.Width, _icon.Height, GraphicsUnit.Pixel, imgAttr);
+        }
 
         // Subtle highlight arc (top-left specular)
         var highlightRect = new Rectangle(

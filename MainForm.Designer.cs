@@ -1,4 +1,6 @@
+using System.Runtime.InteropServices;
 using ResourceMonitor.Controls;
+using ResourceMonitor.Helpers;
 
 namespace ResourceMonitor;
 
@@ -19,24 +21,24 @@ partial class MainForm
     // LED bar (always visible top)
     private LedBarPanel _ledBar;
 
-    // Tabs
-    private TabControl _tabControl;
-    private TabPage _tabDashboard, _tabGraphs, _tabProcesses, _tabWebsites, _tabEvents;
+    // Custom tab navigation
+    private TabNavigation _tabNav;
 
-    // Dashboard tab
+    // Tab content panels
+    private Panel _contentPanel;
     private DashboardDigestPanel _digestPanel;
-
-    // Graphs tab
+    private CpuDetailPanel _cpuPanel;
+    private MemoryDetailPanel _memoryPanel;
     private MemoryGraphPanel _graphPanel;
+    private Panel _processesPanel;
+    private WebsitesPanel _websitesPanel;
+    private Panel _eventsPanel;
 
-    // Processes tab
+    // Processes tab controls
     private BufferedListView _processListView;
     private ContextMenuStrip _processContextMenu;
 
-    // Websites tab
-    private WebsitesPanel _websitesPanel;
-
-    // Events tab
+    // Events tab controls
     private BufferedListView _eventListView;
     private Button _btnRefreshEvents;
 
@@ -45,6 +47,9 @@ partial class MainForm
     private ToolStripStatusLabel _refreshLabel;
     private ToolStripStatusLabel _balloonLabel;
     private ToolStripStatusLabel _oomLabel;
+
+    // All tab content panels for show/hide
+    private Control[] _tabPanels = [];
 
     protected override void Dispose(bool disposing)
     {
@@ -59,6 +64,15 @@ partial class MainForm
         base.Dispose(disposing);
     }
 
+    [DllImport("dwmapi.dll", PreserveSig = true)]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
+
+    private void EnableDarkTitleBar()
+    {
+        int value = 1;
+        DwmSetWindowAttribute(Handle, 20, ref value, sizeof(int));
+    }
+
     private void InitializeComponent()
     {
         components = new System.ComponentModel.Container();
@@ -68,24 +82,51 @@ partial class MainForm
         _ledBar = new LedBarPanel();
         _ledBar.IntervalChanged += SetInterval;
 
-        // === Tab Control ===
-        _tabControl = new TabControl
+        // === Tab Navigation (custom-drawn) ===
+        _tabNav = new TabNavigation();
+
+        // Load tab icons
+        var tabDefs = new (string label, string icon)[]
         {
-            Dock = DockStyle.Fill
+            ("Dashboard", "tab-dashboard"),
+            ("CPU", "tab-cpu"),
+            ("Memory", "tab-memory"),
+            ("Graphs", "tab-graph"),
+            ("Processes", "tab-process"),
+            ("Websites", "tab-website"),
+            ("Events", "tab-events")
+        };
+        for (int i = 0; i < tabDefs.Length; i++)
+        {
+            var dimIcon = SvgIconHelper.Load(tabDefs[i].icon, 18, Theme.TextDim);
+            var activeIcon = SvgIconHelper.Load(tabDefs[i].icon, 18, Theme.TabActive);
+            _tabNav.AddTab(tabDefs[i].label, dimIcon);
+            _tabNav.SetTabIcons(i, activeIcon, dimIcon);
+        }
+
+        _tabNav.TabChanged += OnTabChanged;
+
+        // === Content Panel ===
+        _contentPanel = new Panel
+        {
+            Dock = DockStyle.Fill,
+            BackColor = Theme.BgColor
         };
 
-        // --- Dashboard tab ---
-        _tabDashboard = new TabPage("Dashboard") { BackColor = Theme.BgColor };
-        _digestPanel = new DashboardDigestPanel { Dock = DockStyle.Fill };
-        _tabDashboard.Controls.Add(_digestPanel);
+        // --- Dashboard ---
+        _digestPanel = new DashboardDigestPanel { Dock = DockStyle.Fill, Visible = true };
 
-        // --- Graphs tab ---
-        _tabGraphs = new TabPage("Graphs") { BackColor = Theme.BgColor };
-        _graphPanel = new MemoryGraphPanel { Dock = DockStyle.Fill };
-        _tabGraphs.Controls.Add(_graphPanel);
+        // --- CPU ---
+        _cpuPanel = new CpuDetailPanel { Dock = DockStyle.Fill, Visible = false };
 
-        // --- Processes tab ---
-        _tabProcesses = new TabPage("Processes") { BackColor = Theme.BgColor };
+        // --- Memory ---
+        _memoryPanel = new MemoryDetailPanel { Dock = DockStyle.Fill, Visible = false };
+
+        // --- Graphs ---
+        _graphPanel = new MemoryGraphPanel { Dock = DockStyle.Fill, Visible = false };
+
+        // --- Processes ---
+        _processesPanel = new Panel { Dock = DockStyle.Fill, Visible = false, BackColor = Theme.BgColor };
         _processListView = new BufferedListView
         {
             Dock = DockStyle.Fill,
@@ -112,15 +153,13 @@ partial class MainForm
         _processContextMenu = new ContextMenuStrip(components);
         _processContextMenu.Items.Add("Kill Process", null, OnKillProcess);
         _processListView.ContextMenuStrip = _processContextMenu;
-        _tabProcesses.Controls.Add(_processListView);
+        _processesPanel.Controls.Add(_processListView);
 
-        // --- Websites tab ---
-        _tabWebsites = new TabPage("Websites") { BackColor = Theme.BgColor };
-        _websitesPanel = new WebsitesPanel { Dock = DockStyle.Fill };
-        _tabWebsites.Controls.Add(_websitesPanel);
+        // --- Websites ---
+        _websitesPanel = new WebsitesPanel { Dock = DockStyle.Fill, Visible = false };
 
-        // --- Events tab ---
-        _tabEvents = new TabPage("Events") { BackColor = Theme.BgColor };
+        // --- Events ---
+        _eventsPanel = new Panel { Dock = DockStyle.Fill, Visible = false, BackColor = Theme.BgColor };
         _eventListView = new BufferedListView
         {
             Dock = DockStyle.Fill,
@@ -147,10 +186,14 @@ partial class MainForm
         };
         _btnRefreshEvents.FlatAppearance.BorderColor = Theme.Border;
         _btnRefreshEvents.Click += OnRefreshEvents;
-        _tabEvents.Controls.Add(_eventListView);
-        _tabEvents.Controls.Add(_btnRefreshEvents);
+        _eventsPanel.Controls.Add(_eventListView);
+        _eventsPanel.Controls.Add(_btnRefreshEvents);
 
-        _tabControl.TabPages.AddRange([_tabDashboard, _tabGraphs, _tabProcesses, _tabWebsites, _tabEvents]);
+        // Add all tab panels to content panel
+        _tabPanels = [_digestPanel, _cpuPanel, _memoryPanel, _graphPanel, _processesPanel, _websitesPanel, _eventsPanel];
+        // Add in reverse order so first panel is on top
+        for (int i = _tabPanels.Length - 1; i >= 0; i--)
+            _contentPanel.Controls.Add(_tabPanels[i]);
 
         // === Status Strip ===
         _statusStrip = new StatusStrip { BackColor = Color.FromArgb(30, 30, 35) };
@@ -160,8 +203,9 @@ partial class MainForm
         _oomLabel = new ToolStripStatusLabel("OOM (48h): ...") { Spring = false, ForeColor = Theme.TextDim };
         _statusStrip.Items.AddRange([_refreshLabel, _balloonLabel, _oomLabel]);
 
-        // === Form layout ===
-        Controls.Add(_tabControl);     // Fill — laid out last
+        // === Form layout (Dock order matters: bottom first, top second, fill last) ===
+        Controls.Add(_contentPanel);   // Fill — laid out last
+        Controls.Add(_tabNav);         // Top — laid out third (below LED bar)
         Controls.Add(_ledBar);         // Top — laid out second
         Controls.Add(_statusStrip);    // Bottom — laid out first
 
@@ -176,5 +220,11 @@ partial class MainForm
 
         ResumeLayout(false);
         PerformLayout();
+    }
+
+    private void OnTabChanged(int index)
+    {
+        for (int i = 0; i < _tabPanels.Length; i++)
+            _tabPanels[i].Visible = i == index;
     }
 }

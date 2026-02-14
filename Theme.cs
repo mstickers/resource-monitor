@@ -11,6 +11,10 @@ public static class Theme
     public static readonly Color TextBright = Color.FromArgb(220, 220, 225);
     public static readonly Color TextLabel = Color.FromArgb(180, 180, 185);
 
+    public static readonly Color TabBarBg = Color.FromArgb(28, 28, 33);
+    public static readonly Color TabActive = Color.FromArgb(60, 120, 200);
+    public static readonly Color TabHover = Color.FromArgb(40, 40, 48);
+
     /// <summary>
     /// Maps a 0–100 percentage to a smooth green→yellow→orange→red→violet gradient.
     /// Used by LEDs and value text throughout the UI.

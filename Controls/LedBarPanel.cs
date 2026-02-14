@@ -1,4 +1,5 @@
 using System.Drawing;
+using ResourceMonitor.Helpers;
 
 namespace ResourceMonitor.Controls;
 
@@ -48,7 +49,24 @@ public sealed class LedBarPanel : Control
         Controls.Add(_btn5s);
         Controls.Add(_btn10s);
 
+        LoadIcons();
         Resize += (_, _) => LayoutControls();
+    }
+
+    private void LoadIcons()
+    {
+        var white = Color.White;
+        (LedIndicatorControl led, string name)[] mapping =
+        [
+            (LedCpu, "cpu"), (LedRam, "ram"), (LedDisk, "disk"),
+            (LedNetWan, "wan"), (LedNetDb, "db"),
+            (LedDbCpu, "db-cpu"), (LedDbRam, "db-ram")
+        ];
+        foreach (var (led, name) in mapping)
+        {
+            var icon = SvgIconHelper.Load(name, 20, white);
+            if (icon != null) led.SetIcon(icon);
+        }
     }
 
     protected override void OnHandleCreated(EventArgs e)
