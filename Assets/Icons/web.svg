@@ -2,5 +2,5 @@
   <circle cx="12" cy="12" r="10"/>
   <ellipse cx="12" cy="12" rx="4" ry="10"/>
   <line x1="2" y1="12" x2="22" y2="12"/>
-  <polyline points="2,8 6,9 10,7 14,9.5 18,7.5 22,8.5" stroke-width="1.8"/>
+  <path d="M3.5 7h17M3.5 17h17"/>
 </svg>
