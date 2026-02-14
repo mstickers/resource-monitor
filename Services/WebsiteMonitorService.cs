@@ -78,7 +78,7 @@ public sealed class WebsiteMonitorService : IDisposable
         _ = CheckSiteAsync(name, url);
     }
 
-    private async Task CheckSiteAsync(string name, string url)
+    private async Task CheckSiteAsync(string name, string url, bool isRetry = false)
     {
         WebsiteCheck check;
         var sw = Stopwatch.StartNew();
@@ -100,6 +100,12 @@ public sealed class WebsiteMonitorService : IDisposable
             _lastChecks[name] = check;
             if (_history.TryGetValue(name, out var buf))
                 buf.Add(check);
+        }
+
+        // Schedule retry in 30s if down or slow (500ms+), but only once
+        if (!isRetry && (!check.IsUp || check.ResponseTimeMs >= 500))
+        {
+            _ = Task.Delay(30_000).ContinueWith(_ => CheckSiteAsync(name, url, isRetry: true));
         }
     }
 

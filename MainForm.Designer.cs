@@ -7,6 +7,8 @@ namespace ResourceMonitor;
 /// <summary>Double-buffered dark-themed ListView with owner-drawn column headers.</summary>
 internal sealed class BufferedListView : ListView
 {
+    private DarkHeaderNativeWindow? _headerWindow;
+
     public BufferedListView()
     {
         SetStyle(ControlStyles.OptimizedDoubleBuffer
@@ -16,6 +18,23 @@ internal sealed class BufferedListView : ListView
         DrawItem += OnDrawItem;
         DrawSubItem += OnDrawSubItem;
     }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        // Dark scrollbars via Explorer dark mode theme
+        SetWindowTheme(Handle, "DarkMode_Explorer", null);
+        // Subclass the header control to paint its background dark
+        var headerHandle = SendMessage(Handle, 0x101F /* LVM_GETHEADER */, 0, 0);
+        if (headerHandle != IntPtr.Zero)
+            _headerWindow = new DarkHeaderNativeWindow(headerHandle);
+    }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SendMessage(IntPtr hWnd, int msg, int wParam, int lParam);
+
+    [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
+    private static extern int SetWindowTheme(IntPtr hwnd, string? pszSubAppName, string? pszSubIdList);
 
     private static void OnDrawColumnHeader(object? sender, DrawListViewColumnHeaderEventArgs e)
     {
@@ -39,6 +58,26 @@ internal sealed class BufferedListView : ListView
 
     private static void OnDrawItem(object? sender, DrawListViewItemEventArgs e) => e.DrawDefault = true;
     private static void OnDrawSubItem(object? sender, DrawListViewSubItemEventArgs e) => e.DrawDefault = true;
+
+    /// <summary>Subclasses the ListView header control to paint background dark.</summary>
+    private sealed class DarkHeaderNativeWindow : NativeWindow
+    {
+        private const int WM_ERASEBKGND = 0x0014;
+
+        public DarkHeaderNativeWindow(IntPtr handle) => AssignHandle(handle);
+
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == WM_ERASEBKGND)
+            {
+                using var g = Graphics.FromHdc(m.WParam);
+                g.Clear(Color.FromArgb(35, 35, 40));
+                m.Result = (IntPtr)1;
+                return;
+            }
+            base.WndProc(ref m);
+        }
+    }
 }
 
 partial class MainForm
